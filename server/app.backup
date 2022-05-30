@@ -1,0 +1,97 @@
+import express from "express";
+import path from "path";
+import cookieParser from "cookie-parser";
+import logger from "morgan";
+import indexRouter from "./routes/index.js";
+import usersRouter from "./routes/users.js";
+import config from "./config/default.js";
+import fs from "fs";
+
+let data = "";
+
+try {
+  data = fs.readFileSync("server/data/data.json", "utf8");
+} catch (err) {
+  console.error(err);
+}
+
+const bom = JSON.parse(data);
+console.log(bom[0].nodes);
+const edgesRows = bom[0].edges;
+const nodesRows = bom[0].nodes;
+
+console.log(edgesRows);
+
+//esm
+import { EdgeFile, NodeFile, Dataset, Client } from "@graphistry/node-api";
+import { fileURLToPath } from "url";
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+
+var app = express();
+app.use(logger("dev"));
+app.use(express.json());
+app.use(express.urlencoded({ extended: false }));
+app.use(cookieParser());
+app.use(express.static(path.join(__dirname, "../public")));
+
+app.use("/", indexRouter);
+app.use("/users", usersRouter);
+
+console.log("running!");
+
+///////////////////////////////////////////////////////////////////////////////
+
+console.log("try graphistry!");
+
+// console.log(Object.keys(data));
+
+const user = process.env.GRAPHISTRY_USER || config.graphistry.user;
+if (!user) {
+  throw new Error("GRAPHISTRY_USER environment variable not set");
+}
+
+const password = process.env.GRAPHISTRY_PASSWORD || config.graphistry.password;
+if (!password) {
+  throw new Error("GRAPHISTRY_PASSWORD environment variable not set");
+}
+
+const protocol = process.env.GRAPHISTRY_PROTOCOL || "https";
+const host = process.env.GRAPHISTRY_HOST || "hub.graphistry.com";
+
+const client = new Client(user, password, protocol, host);
+
+const edgesFile = new EdgeFile(edgesRows, "json", "my_edges", {
+  description: "My row-oriented edges json file",
+  parser_options: { orient: "records" },
+  //also: file_compression, sql_transforms
+});
+const nodesFile = new NodeFile(nodesRows, "json", "my_nodes", {
+  // optional
+  parser_options: { orient: "records" },
+});
+
+const dataset = new Dataset(
+  {
+    node_encodings: { bindings: { node: "_id" } },
+    edge_encodings: { bindings: { source: "_from", destination: "_to" } },
+    metadata: {},
+    name: "bom8210",
+  },
+  edgesFile,
+  nodesFile
+);
+
+await dataset.upload(client);
+
+console.log(
+  "Succeess! Uploaded dataset to Graphistry: URL: " + dataset.datasetURL
+);
+
+console.log("Succeess! Dataset ID: " + dataset.datasetID);
+
+// console.log(`View dataset ${dataset.datasetID} at ${dataset.datasetURL}`);
+
+///////////////////////////////////////////////////////////////////////////////
+
+export default app;
